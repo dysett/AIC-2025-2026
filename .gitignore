@@ -1,0 +1,7 @@
+*.class
+data/*.db
+data/*.db-*
+classes/
+build/
+.idea/
+.vscode/
