@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>ZLAGODA AIS</AssemblyName>
+    <RootNamespace>ZlagodaLauncher</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>true</UseAppHost>
+  </PropertyGroup>
+</Project>

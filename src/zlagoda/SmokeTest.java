@@ -24,5 +24,35 @@ public final class SmokeTest {
         System.out.println("manufacturers=" + Db.scalar("SELECT COUNT(manufacturer) FROM Product"));
         System.out.println("checks=" + Db.scalar("SELECT COUNT(*) FROM \"Check\""));
         System.out.println("salesTotal=" + Db.scalar("SELECT ROUND(SUM(sum_total), 2) FROM \"Check\""));
+        System.out.println("courseworkGroupedRows=" + Db.scalar("""
+                SELECT COUNT(*)
+                FROM (
+                    SELECT C.category_number
+                    FROM "Check" CH
+                    JOIN Sale S ON S.check_number = CH.check_number
+                    JOIN Store_Product SP ON SP.UPC = S.UPC
+                    JOIN Product P ON P.id_product = SP.id_product
+                    JOIN Category C ON C.category_number = P.category_number
+                    WHERE date(CH.print_date) BETWEEN date(?) AND date(?)
+                    GROUP BY C.category_number, C.category_name
+                )
+                """, "2026-06-01", "2026-06-30"));
+        System.out.println("courseworkAllCategoryCustomers=" + Db.scalar("""
+                SELECT COUNT(*)
+                FROM Customer_Card CC
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM Category C
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM "Check" CH
+                        JOIN Sale S ON S.check_number = CH.check_number
+                        JOIN Store_Product SP ON SP.UPC = S.UPC
+                        JOIN Product P ON P.id_product = SP.id_product
+                        WHERE CH.card_number = CC.card_number
+                          AND P.category_number = C.category_number
+                    )
+                )
+                """));
     }
 }

@@ -21,9 +21,12 @@ public final class Db {
     }
 
     public static Connection connect() throws SQLException {
+        // DriverManager відкриває фізичне підключення до SQLite-файлу data/zlagoda.db.
+        // Усі класи застосунку використовують цей метод, щоб підключення налаштовувались однаково.
         Connection con = DriverManager.getConnection(URL);
         try (Statement st = con.createStatement()) {
             // У SQLite зовнішні ключі треба вмикати для кожного нового підключення.
+            // Без цього SQLite прийме FOREIGN KEY у схемі, але не буде перевіряти їх під час INSERT/UPDATE/DELETE.
             st.execute("PRAGMA foreign_keys = ON");
         }
         return con;
@@ -31,7 +34,11 @@ public final class Db {
 
     public static void initialize() {
         try {
+            // Папка data зберігає локальний файл бази даних.
+            // Її створення тут дозволяє запускати програму одразу після розпакування проєкту.
             Files.createDirectories(Path.of("data"));
+
+            // Явне завантаження JDBC-драйвера потрібне, щоб DriverManager знайшов sqlite-jdbc.
             Class.forName("org.sqlite.JDBC");
             try (Connection con = connect()) {
                 // Схема і тестові дані створюються автоматично, щоб проєкт запускався одразу.
@@ -293,13 +300,17 @@ public final class Db {
     }
 
     public static int execute(String sql, Object... params) throws SQLException {
-        // Універсальний метод для INSERT/UPDATE/DELETE через PreparedStatement.
+        // Універсальний метод для INSERT/UPDATE/DELETE.
+        // Він сам відкриває підключення, виконує команду і закриває підключення через try-with-resources.
         try (Connection con = connect()) {
             return execute(con, sql, params);
         }
     }
 
     public static int execute(Connection con, String sql, Object... params) throws SQLException {
+        // Цей варіант приймає вже відкрите підключення.
+        // Він використовується в транзакціях, наприклад під час створення чека,
+        // коли кілька INSERT/UPDATE мають або виконатися всі разом, або всі відкотитися.
         try (PreparedStatement ps = con.prepareStatement(sql)) {
             bind(ps, params);
             return ps.executeUpdate();
@@ -307,12 +318,16 @@ public final class Db {
     }
 
     public static DefaultTableModel tableModel(String sql, Object... params) throws SQLException {
-        // SELECT-запит перетворюється у модель таблиці Swing.
-        // Це дозволяє показувати будь-який SQL-звіт у JTable.
+        // Метод виконує SELECT і перетворює ResultSet у DefaultTableModel для JTable.
+        // Саме через цей метод більшість звітів переходить від SQL-запиту до таблиці на екрані.
         try (Connection con = connect();
              PreparedStatement ps = con.prepareStatement(sql)) {
+            // Значення для знаків питання у SQL передаються окремо від тексту запиту.
+            // Наприклад, дати "Від" і "До" у звіті стають параметрами PreparedStatement.
             bind(ps, params);
             try (ResultSet rs = ps.executeQuery()) {
+                // ResultSetMetaData дозволяє дізнатися назви колонок без ручного дублювання.
+                // Тому заголовки JTable автоматично відповідають SELECT-виразам або псевдонімам AS.
                 ResultSetMetaData md = rs.getMetaData();
                 int columns = md.getColumnCount();
                 String[] names = new String[columns];
@@ -322,14 +337,19 @@ public final class Db {
                 DefaultTableModel model = new DefaultTableModel(names, 0) {
                     @Override
                     public boolean isCellEditable(int row, int column) {
+                        // Звітні таблиці тільки відображають результат запиту.
+                        // Редагування результату прямо в JTable вимкнене, щоб не створювати ілюзію зміни БД.
                         return false;
                     }
                 };
                 while (rs.next()) {
+                    // Кожен рядок ResultSet копіюється в Object[].
+                    // Після цього рядок додається до моделі, і Swing сам перемальовує JTable.
                     Object[] row = new Object[columns];
                     for (int i = 0; i < columns; i++) {
                         Object value = rs.getObject(i + 1);
                         if (value instanceof BigDecimal bd) {
+                            // Грошові та числові значення показуються без наукового формату.
                             value = bd.toPlainString();
                         }
                         row[i] = value;
@@ -342,7 +362,8 @@ public final class Db {
     }
 
     public static Object scalar(String sql, Object... params) throws SQLException {
-        // scalar повертає одне значення, наприклад COUNT(*) або SUM(...).
+        // scalar повертає одне значення з першої колонки першого рядка.
+        // Він зручний для перевірок COUNT(*), SUM(...), пошуку ціни або іншого одиничного результату.
         try (Connection con = connect();
              PreparedStatement ps = con.prepareStatement(sql)) {
             bind(ps, params);
@@ -354,6 +375,7 @@ public final class Db {
 
     private static void bind(PreparedStatement ps, Object... params) throws SQLException {
         // Параметри підставляються без конкатенації рядків, щоб уникнути SQL injection.
+        // Нумерація параметрів у JDBC починається з 1, тому використовується i + 1.
         for (int i = 0; i < params.length; i++) {
             ps.setObject(i + 1, params[i]);
         }

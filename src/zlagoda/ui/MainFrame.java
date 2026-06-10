@@ -35,11 +35,10 @@ public class MainFrame extends JFrame {
         tabs.addTab("Звіти", new ReportPanel(session));
         add(tabs, BorderLayout.CENTER);
 
-        // Нижній рядок показує поточного користувача і нагадує, що дані читаються через SQL.
+        // Нижній рядок показує тільки поточного користувача і його роль.
         JPanel status = new JPanel(new BorderLayout());
         status.add(new JLabel("  Користувач: " + session.username()
-                + " | Роль: " + (session.isManager() ? "Менеджер" : "Касир")
-                + " | SQL mode: чисті JDBC PreparedStatement, ORM не використовується"), BorderLayout.CENTER);
+                + " | Роль: " + (session.isManager() ? "Менеджер" : "Касир")), BorderLayout.CENTER);
         add(status, BorderLayout.SOUTH);
     }
 }

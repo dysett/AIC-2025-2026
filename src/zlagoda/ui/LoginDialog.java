@@ -11,6 +11,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
+import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import zlagoda.AuthService;
 import zlagoda.Session;
@@ -30,6 +31,14 @@ public class LoginDialog extends JDialog {
         pack();
         setResizable(false);
         setLocationRelativeTo(owner);
+        // Під час запуску з PowerShell діалог входу іноді відкривається позаду інших вікон.
+        // Примусово піднімаємо його поверх екрана, щоб користувач одразу бачив форму входу.
+        setAlwaysOnTop(true);
+        SwingUtilities.invokeLater(() -> {
+            toFront();
+            requestFocus();
+            username.requestFocusInWindow();
+        });
     }
 
     public Session getSession() {

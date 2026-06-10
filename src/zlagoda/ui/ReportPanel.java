@@ -58,6 +58,8 @@ public class ReportPanel extends JPanel {
         report.addItem("Сума продажів касира");
         report.addItem("Кількість проданого товару");
         report.addItem("Інформація про себе");
+        report.addItem("Звіт 3Т: продажі категорій за період");
+        report.addItem("Звіт 3Т: клієнти, що купили всі категорії");
     }
 
     private JPanel top() {
@@ -67,6 +69,9 @@ public class ReportPanel extends JPanel {
         JButton print = new JButton("Друк");
         run.addActionListener(e -> runReport());
         print.addActionListener(e -> print());
+        // Поля залишаються універсальними для всіх звітів:
+        // один звіт використовує дату, інший - UPC, третій - ID працівника або відсоток знижки.
+        // Це спрощує інтерфейс і дозволяє не створювати окрему форму під кожен SELECT.
         p.add(new JLabel("Звіт"));
         p.add(report);
         p.add(new JLabel("Від"));
@@ -87,7 +92,9 @@ public class ReportPanel extends JPanel {
     private void runReport() {
         try {
             String r = (String) report.getSelectedItem();
-            // Усі звіти формуються напряму через SQL без ORM.
+            // runReport() є центральним обробником кнопки "Сформувати".
+            // Він читає вибраний пункт JComboBox і запускає відповідний SQL-запит.
+            // Результат кожного SELECT одразу підставляється в JTable через Db.tableModel(...).
             switch (r) {
                 case "Усі працівники" -> requireManager("""
                         -- Повний список працівників доступний тільки менеджеру.
@@ -157,9 +164,12 @@ public class ReportPanel extends JPanel {
                         FROM Employee
                         WHERE id_employee = ?
                         """, session.employeeId()));
+                case "Звіт 3Т: продажі категорій за період" -> table.setModel(categorySalesForCoursework());
+                case "Звіт 3Т: клієнти, що купили всі категорії" -> table.setModel(customersWhoBoughtAllCategories());
                 default -> throw new IllegalStateException("Unknown report");
             }
         } catch (SQLException | NumberFormatException ex) {
+            // Користувач бачить помилку в діалоговому вікні, наприклад якщо параметр має неправильний формат.
             JOptionPane.showMessageDialog(this, ex.getMessage(), "SQL error", JOptionPane.ERROR_MESSAGE);
         }
     }
@@ -287,6 +297,78 @@ public class ReportPanel extends JPanel {
                 GROUP BY S.UPC, P.product_name
                 ORDER BY units_sold DESC
                 """, from.getText().trim(), to.getText().trim(), upc.getText().trim(), upc.getText().trim());
+    }
+
+    private javax.swing.table.DefaultTableModel categorySalesForCoursework() throws SQLException {
+        // Запит для індивідуального звіту з 3 триместру.
+        // Параметричність: межі періоду не зашиті в SQL, а беруться з полів "Від" і "До".
+        // Після натискання "Сформувати" ці значення передаються у два знаки питання WHERE date(...) BETWEEN date(?) AND date(?).
+        // Багатотабличність: у запиті використано 5 таблиць:
+        // Check - дата продажу і номер чека;
+        // Sale - продані позиції, кількість і ціна;
+        // Store_Product - зв'язок UPC з товаром;
+        // Product - номенклатура товарів;
+        // Category - назва категорії для групування.
+        // Групування: GROUP BY C.category_number, C.category_name збирає всі продажі однієї категорії в один рядок.
+        return Db.tableModel("""
+                -- Параметричний багатотабличний запит із групуванням.
+                -- Показує до 5 категорій із найбільшою сумою продажів за вибраний період.
+                SELECT C.category_name AS category,
+                       -- COUNT(DISTINCT ...) рахує кількість різних чеків, у яких були товари категорії.
+                       COUNT(DISTINCT CH.check_number) AS checks_count,
+                       -- SUM(S.product_number) показує загальну кількість проданих одиниць у категорії.
+                       SUM(S.product_number) AS units_sold,
+                       -- Сума рядка продажу = кількість * ціна продажу, ROUND залишає 2 знаки після коми.
+                       ROUND(SUM(S.product_number * S.selling_price), 2) AS sales_sum,
+                       -- AVG дає середню ціну продажу позицій цієї категорії.
+                       ROUND(AVG(S.selling_price), 2) AS avg_price
+                FROM "Check" CH
+                JOIN Sale S ON S.check_number = CH.check_number
+                JOIN Store_Product SP ON SP.UPC = S.UPC
+                JOIN Product P ON P.id_product = SP.id_product
+                JOIN Category C ON C.category_number = P.category_number
+                WHERE date(CH.print_date) BETWEEN date(?) AND date(?)
+                GROUP BY C.category_number, C.category_name
+                ORDER BY sales_sum DESC, C.category_name
+                LIMIT 5
+                """, from.getText().trim(), to.getText().trim());
+    }
+
+    private javax.swing.table.DefaultTableModel customersWhoBoughtAllCategories() throws SQLException {
+        // Запит для індивідуального звіту з подвійним запереченням.
+        // Логіка читається так:
+        // "вибрати клієнта, для якого НЕ ІСНУЄ категорії,
+        //  для якої НЕ ІСНУЄ покупки цього клієнта".
+        // У реляційному сенсі це реалізує умову "клієнт купив товари з усіх категорій".
+        // Багатотабличність: перевірка покупки проходить через Check, Sale, Store_Product і Product,
+        // а список усіх категорій береться з Category.
+        return Db.tableModel("""
+                -- Багатотабличний запит із подвійним запереченням.
+                -- Знаходить постійних клієнтів, які купили хоча б один товар з кожної категорії.
+                SELECT CC.card_number,
+                       CC.cust_surname || ' ' || CC.cust_name AS customer,
+                       CC.phone_number,
+                       CC.percent
+                FROM Customer_Card CC
+                WHERE NOT EXISTS (
+                    -- Зовнішній підзапит перебирає всі категорії з довідника Category.
+                    SELECT 1
+                    FROM Category C
+                    WHERE NOT EXISTS (
+                        -- Внутрішній підзапит шукає хоча б одну покупку поточного клієнта CC
+                        -- у поточній категорії C. Якщо такої покупки немає, внутрішній NOT EXISTS істинний.
+                        SELECT 1
+                        FROM "Check" CH
+                        JOIN Sale S ON S.check_number = CH.check_number
+                        JOIN Store_Product SP ON SP.UPC = S.UPC
+                        JOIN Product P ON P.id_product = SP.id_product
+                        WHERE CH.card_number = CC.card_number
+                          AND P.category_number = C.category_number
+                    )
+                )
+                ORDER BY CC.cust_surname, CC.cust_name
+                LIMIT 5
+                """);
     }
 
     private int percentValue() {

@@ -3,5 +3,9 @@ data/*.db
 data/*.db-*
 classes/
 build/
+launcher/bin/
+launcher/obj/
+launcher/publish/
+.dotnet/
 .idea/
 .vscode/
